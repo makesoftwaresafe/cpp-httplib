@@ -1,19 +1,24 @@
 CXX = clang++
 CXXFLAGS = -g -std=c++11 -I. -Wall -Wextra -Wtype-limits -Wconversion -Wshadow # -fno-exceptions -DCPPHTTPLIB_NO_EXCEPTIONS -fsanitize=address
 
-PREFIX = /usr/local
-#PREFIX = $(shell brew --prefix)
+PREFIX ?= $(shell brew --prefix)
 
-OPENSSL_DIR = $(PREFIX)/opt/openssl@1.1
-#OPENSSL_DIR = $(PREFIX)/opt/openssl@3
+OPENSSL_DIR = $(PREFIX)/opt/openssl@3
 OPENSSL_SUPPORT = -DCPPHTTPLIB_OPENSSL_SUPPORT -I$(OPENSSL_DIR)/include -L$(OPENSSL_DIR)/lib -lssl -lcrypto
+
+ifneq ($(OS), Windows_NT)
+	UNAME_S := $(shell uname -s)
+	ifeq ($(UNAME_S), Darwin)
+		OPENSSL_SUPPORT += -DCPPHTTPLIB_USE_CERTS_FROM_MACOSX_KEYCHAIN -framework CoreFoundation -framework Security
+	endif
+endif
 
 ZLIB_SUPPORT = -DCPPHTTPLIB_ZLIB_SUPPORT -lz
 
 BROTLI_DIR = $(PREFIX)/opt/brotli
 BROTLI_SUPPORT = -DCPPHTTPLIB_BROTLI_SUPPORT -I$(BROTLI_DIR)/include -L$(BROTLI_DIR)/lib -lbrotlicommon -lbrotlienc -lbrotlidec
 
-TEST_ARGS = gtest/gtest-all.cc gtest/gtest_main.cc $(OPENSSL_SUPPORT) $(ZLIB_SUPPORT) $(BROTLI_SUPPORT) -pthread
+TEST_ARGS = gtest/gtest-all.cc gtest/gtest_main.cc $(OPENSSL_SUPPORT) $(ZLIB_SUPPORT) $(BROTLI_SUPPORT) -pthread -lcurl
 
 # By default, use standalone_fuzz_target_runner.
 # This runner does no fuzzing, but simply executes the inputs
@@ -58,16 +63,8 @@ httplib.cc : ../httplib.h
 	python3 ../split.py -o .
 
 cert.pem:
-	openssl genrsa 2048 > key.pem
-	openssl req -new -batch -config test.conf -key key.pem | openssl x509 -days 3650 -req -signkey key.pem > cert.pem
-	openssl req -x509 -config test.conf -key key.pem -sha256 -days 3650 -nodes -out cert2.pem -extensions SAN
-	openssl genrsa 2048 > rootCA.key.pem
-	openssl req -x509 -new -batch -config test.rootCA.conf -key rootCA.key.pem -days 1024 > rootCA.cert.pem
-	openssl genrsa 2048 > client.key.pem
-	openssl req -new -batch -config test.conf -key client.key.pem | openssl x509 -days 370 -req -CA rootCA.cert.pem -CAkey rootCA.key.pem -CAcreateserial > client.cert.pem
-	openssl genrsa -passout pass:test123! 2048 > key_encrypted.pem
-	openssl req -new -batch -config test.conf -key key_encrypted.pem | openssl x509 -days 3650 -req -signkey key_encrypted.pem > cert_encrypted.pem
-	#c_rehash .
+	./gen-certs.sh
 
 clean:
 	rm -f test test_split test_proxy server_fuzzer *.pem *.0 *.o *.1 *.srl httplib.h httplib.cc
+
